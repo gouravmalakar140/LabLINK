@@ -15,16 +15,26 @@ function resolveSafeStorePath(): string {
 }
 
 let writeQueue: Promise<void> = Promise.resolve();
+let memoryCache: LabLinkStoreData | null = null;
 
 async function writeStoreAtomic(data: LabLinkStoreData): Promise<void> {
-  const targetPath = resolveSafeStorePath();
-  const tempPath = `${targetPath}.tmp`;
-  await fs.mkdir(DATA_DIR, { recursive: true });
-  await fs.writeFile(tempPath, JSON.stringify(data, null, 2), 'utf-8');
-  await fs.rename(tempPath, targetPath);
+  memoryCache = data;
+  try {
+    const targetPath = resolveSafeStorePath();
+    const tempPath = `${targetPath}.tmp`;
+    await fs.mkdir(DATA_DIR, { recursive: true });
+    await fs.writeFile(tempPath, JSON.stringify(data, null, 2), 'utf-8');
+    await fs.rename(tempPath, targetPath);
+  } catch {
+    // Graceful fallback to in-memory cache on read-only container filesystems
+  }
 }
 
 export async function readStore(): Promise<LabLinkStoreData> {
+  if (memoryCache) {
+    return memoryCache;
+  }
+
   const targetPath = resolveSafeStorePath();
   try {
     const raw = await fs.readFile(targetPath, 'utf-8');
@@ -32,11 +42,12 @@ export async function readStore(): Promise<LabLinkStoreData> {
     if (!Array.isArray(parsed.stations) || !Array.isArray(parsed.requests)) {
       throw new Error('Corrupt store shape');
     }
+    memoryCache = parsed;
     return parsed;
   } catch {
     const seeded = createSeedData(formatLocalIsoDate());
     await mutateStore(async () => seeded);
-    return seeded;
+    return memoryCache ?? seeded;
   }
 }
 
@@ -47,20 +58,25 @@ export async function mutateStore<T>(
   let nextStore!: LabLinkStoreData;
 
   const task = writeQueue.then(async () => {
-    const targetPath = resolveSafeStorePath();
-    let current: LabLinkStoreData;
-    try {
-      const raw = await fs.readFile(targetPath, 'utf-8');
-      current = JSON.parse(raw) as LabLinkStoreData;
-      if (!Array.isArray(current.stations) || !Array.isArray(current.requests)) {
-        current = createSeedData(formatLocalIsoDate());
+    let current = memoryCache;
+    if (!current) {
+      const targetPath = resolveSafeStorePath();
+      try {
+        const raw = await fs.readFile(targetPath, 'utf-8');
+        const parsed = JSON.parse(raw) as LabLinkStoreData;
+        if (Array.isArray(parsed.stations) && Array.isArray(parsed.requests)) {
+          current = parsed;
+        }
+      } catch {
+        current = null;
       }
-    } catch {
+    }
+
+    if (!current) {
       current = createSeedData(formatLocalIsoDate());
     }
 
     const maybeNew = await updater(current);
-    // If updater returned a full store object when initializing, handle cleanly
     if (
       maybeNew &&
       typeof maybeNew === 'object' &&
@@ -84,5 +100,5 @@ export async function mutateStore<T>(
 export async function resetStore(): Promise<LabLinkStoreData> {
   const seeded = createSeedData(formatLocalIsoDate());
   await mutateStore(() => seeded);
-  return seeded;
+  return memoryCache ?? seeded;
 }

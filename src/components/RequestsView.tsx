@@ -1,16 +1,20 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   AlertTriangle,
   CheckCircle2,
+  ChevronDown,
+  ChevronUp,
   Clock,
   ShieldAlert,
   Sparkles,
   XCircle,
 } from 'lucide-react';
 import type { BookingRequest, RequestStatus } from '../types/lablink.ts';
+import { formatHourRange } from '../utils/format.ts';
 
 interface RequestsViewProps {
   requests: BookingRequest[];
+  initialFilter?: 'all' | RequestStatus;
   onDecisionApplied: (updated: BookingRequest) => void;
   onNewRequest: () => void;
 }
@@ -27,17 +31,17 @@ const STATUS_META: Record<
     Icon: CheckCircle2,
   },
   reallocated: {
-    label: 'Reallocated by AI',
+    label: 'AI Reallocated',
     colorClass: 'text-blue-800 bg-blue-50 border-blue-200',
     Icon: Sparkles,
   },
   pending_faculty: {
-    label: 'Pending Faculty Review',
+    label: 'Pending Review',
     colorClass: 'text-amber-800 bg-amber-50 border-amber-200',
     Icon: Clock,
   },
   orientation_required: {
-    label: 'Safety Orientation Required',
+    label: 'Orientation Needed',
     colorClass: 'text-amber-800 bg-amber-50 border-amber-200',
     Icon: ShieldAlert,
   },
@@ -50,13 +54,19 @@ const STATUS_META: Record<
 
 export function RequestsView({
   requests,
+  initialFilter = 'all',
   onDecisionApplied,
   onNewRequest,
 }: RequestsViewProps) {
-  const [filter, setFilter] = useState<StatusFilter>('all');
+  const [filter, setFilter] = useState<StatusFilter>(initialFilter);
   const [simulatorOpen, setSimulatorOpen] = useState(true);
+  const [expandedId, setExpandedId] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  useEffect(() => {
+    setFilter(initialFilter);
+  }, [initialFilter]);
 
   const filtered = requests.filter((r) => (filter === 'all' ? true : r.status === filter));
 
@@ -87,28 +97,34 @@ export function RequestsView({
 
   return (
     <section className="space-y-6" aria-labelledby="requests-heading">
-      <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 pb-6 border-b border-slate-200">
+      <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 pb-5 border-b border-slate-200">
         <div>
           <h1 id="requests-heading" className="text-2xl sm:text-3xl font-bold text-slate-900">
-            Project Access Requests & Faculty Review
+            Lab Access Requests
           </h1>
-          <p className="text-sm sm:text-base text-slate-600 mt-1.5">
-            Track cross-departmental lab bookings, AI reallocations, and test faculty clearance workflows interactively.
+          <p className="text-sm text-slate-600 mt-1">
+            Track bookings and test faculty approval actions in real time.
           </p>
         </div>
 
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-1 p-1 bg-slate-100 rounded-lg w-fit">
           <button
             type="button"
-            onClick={() => setSimulatorOpen((prev) => !prev)}
-            aria-pressed={simulatorOpen}
-            className={`px-3.5 py-2 text-xs font-semibold rounded-lg border transition-colors cursor-pointer whitespace-nowrap ${
-              simulatorOpen
-                ? 'bg-slate-900 text-white border-slate-900'
-                : 'bg-white text-slate-800 border-slate-300 hover:bg-slate-50'
+            onClick={() => setSimulatorOpen(false)}
+            className={`px-3 py-1.5 text-xs font-semibold rounded-md transition-colors cursor-pointer whitespace-nowrap ${
+              !simulatorOpen ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-600 hover:text-slate-900'
             }`}
           >
-            {simulatorOpen ? 'Faculty Review Simulator: On' : 'Faculty Review Simulator: Off'}
+            Student View
+          </button>
+          <button
+            type="button"
+            onClick={() => setSimulatorOpen(true)}
+            className={`px-3 py-1.5 text-xs font-semibold rounded-md transition-colors cursor-pointer whitespace-nowrap ${
+              simulatorOpen ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-600 hover:text-slate-900'
+            }`}
+          >
+            Faculty Review
           </button>
         </div>
       </div>
@@ -128,7 +144,7 @@ export function RequestsView({
             },
             {
               id: 'reallocated',
-              label: `AI Reallocated (${requests.filter((r) => r.status === 'reallocated').length})`,
+              label: `AI (${requests.filter((r) => r.status === 'reallocated').length})`,
             },
             {
               id: 'orientation_required',
@@ -160,16 +176,16 @@ export function RequestsView({
 
       {filtered.length === 0 ? (
         <div className="bg-white border border-slate-200 rounded-xl p-10 text-center space-y-3">
-          <p className="text-base font-semibold text-slate-900">No requests match this filter</p>
+          <p className="text-base font-semibold text-slate-900">No requests in this filter</p>
           <p className="text-sm text-slate-600">
-            Submit a new project-based lab access request to test instant or faculty-reviewed allocation.
+            Submit a new request to test instant or faculty-reviewed clearance.
           </p>
           <button
             type="button"
             onClick={onNewRequest}
             className="inline-flex items-center px-4 py-2 text-sm font-semibold text-white bg-blue-700 hover:bg-blue-800 rounded-lg cursor-pointer"
           >
-            Create Access Request
+            New Request
           </button>
         </div>
       ) : (
@@ -177,7 +193,7 @@ export function RequestsView({
           {filtered.map((req) => {
             const meta = STATUS_META[req.status];
             const StatusIcon = meta.Icon;
-            const isCrossDept = req.studentDepartment !== req.stationDepartment;
+            const isExpanded = expandedId === req.id;
             const canReview =
               req.status === 'pending_faculty' || req.status === 'orientation_required';
 
@@ -188,7 +204,7 @@ export function RequestsView({
               >
                 <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3">
                   <div className="space-y-1">
-                    <div className="flex flex-wrap items-center gap-2 text-xs text-slate-600">
+                    <div className="flex flex-wrap items-center gap-1.5 text-xs text-slate-600">
                       <span className="font-mono tabular-nums font-semibold text-slate-900">
                         {req.stationCode}
                       </span>
@@ -196,73 +212,70 @@ export function RequestsView({
                       <span>
                         {req.studentName} ({req.studentDepartment} → {req.stationDepartment})
                       </span>
-                      {isCrossDept && (
-                        <>
-                          <span aria-hidden="true">·</span>
-                          <span className="font-medium text-blue-700">Cross-Dept Session</span>
-                        </>
-                      )}
+                      <span aria-hidden="true">·</span>
+                      <span className="font-mono tabular-nums font-medium text-slate-800">
+                        {formatHourRange(req.startHour, req.endHour)}
+                      </span>
+                      <span aria-hidden="true">·</span>
+                      <span>{req.seatsRequested} bay(s)</span>
                     </div>
                     <h2 className="text-base font-semibold text-slate-900">{req.projectTitle}</h2>
                   </div>
 
                   <div
-                    className={`inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-semibold border rounded-md shrink-0 whitespace-nowrap ${meta.colorClass}`}
+                    className={`inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-semibold border rounded-md shrink-0 whitespace-nowrap w-fit ${meta.colorClass}`}
                   >
                     <StatusIcon className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
                     <span>{meta.label}</span>
                   </div>
                 </div>
 
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-2 border-t border-slate-100 text-xs">
-                  <div>
-                    <p className="text-slate-500">Scheduled Slot</p>
-                    <p className="font-mono tabular-nums font-semibold text-slate-900 mt-0.5">
-                      {req.date} {String(req.startHour).padStart(2, '0')}:00–
-                      {String(req.endHour).padStart(2, '0')}:00
-                    </p>
-                  </div>
-                  <div>
-                    <p className="text-slate-500">Project Deadline</p>
-                    <p className="font-mono tabular-nums font-semibold text-slate-900 mt-0.5">
-                      {req.projectDeadline}
-                    </p>
-                  </div>
-                  <div>
-                    <p className="text-slate-500">Bays & Track</p>
-                    <p className="font-medium text-slate-900 mt-0.5">
-                      {req.seatsRequested} bay(s) ·{' '}
-                      {req.bayTrack === 'cross_dept_bay' ? 'Shareable Bay' : 'Primary Equipment'}
-                    </p>
-                  </div>
-                  <div>
-                    <p className="text-slate-500">Safety Clearance</p>
-                    <p className="font-medium text-slate-900 mt-0.5">
-                      {req.safetyCleared ? 'Verified' : 'Orientation Pending'}
-                    </p>
-                  </div>
+                <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-slate-600">
+                  <p className="truncate max-w-2xl">{req.facultyNote}</p>
+
+                  <button
+                    type="button"
+                    onClick={() => setExpandedId((prev) => (prev === req.id ? null : req.id))}
+                    aria-expanded={isExpanded}
+                    className="inline-flex items-center gap-0.5 font-semibold text-slate-700 hover:text-slate-900 cursor-pointer shrink-0"
+                  >
+                    <span>{isExpanded ? 'Hide Details' : 'Details'}</span>
+                    {isExpanded ? (
+                      <ChevronUp className="w-3.5 h-3.5" aria-hidden="true" />
+                    ) : (
+                      <ChevronDown className="w-3.5 h-3.5" aria-hidden="true" />
+                    )}
+                  </button>
                 </div>
 
-                <div className="text-xs text-slate-600 bg-slate-50 border border-slate-200 rounded-lg p-3 space-y-1">
-                  <p>
-                    <span className="font-semibold text-slate-800">Specs:</span> {req.requiredSpecs}
-                  </p>
-                  <p>
-                    <span className="font-semibold text-slate-800">Review Note:</span>{' '}
-                    {req.facultyNote}
-                  </p>
-                  {req.aiAllocationNote && (
-                    <p className="text-blue-800">
-                      <span className="font-semibold">AI Optimizer Note:</span>{' '}
-                      {req.aiAllocationNote}
+                {isExpanded && (
+                  <div className="text-xs text-slate-700 bg-slate-50 border border-slate-200 rounded-lg p-3.5 space-y-1.5">
+                    <div className="flex flex-wrap gap-x-4 gap-y-1 text-slate-600">
+                      <span>
+                        Date: <strong className="font-mono tabular-nums text-slate-900">{req.date}</strong>
+                      </span>
+                      <span>
+                        Deadline: <strong className="font-mono tabular-nums text-slate-900">{req.projectDeadline}</strong>
+                      </span>
+                      <span>
+                        Safety: <strong className="text-slate-900">{req.safetyCleared ? 'Verified' : 'Orientation Pending'}</strong>
+                      </span>
+                    </div>
+                    <p>
+                      <strong className="text-slate-900">Required Specs:</strong> {req.requiredSpecs}
                     </p>
-                  )}
-                </div>
+                    {req.aiAllocationNote && (
+                      <p className="text-blue-800">
+                        <strong>AI Match Note:</strong> {req.aiAllocationNote}
+                      </p>
+                    )}
+                  </div>
+                )}
 
                 {simulatorOpen && canReview && (
-                  <div className="pt-2 border-t border-slate-100 flex flex-wrap items-center justify-between gap-2">
+                  <div className="pt-3 border-t border-slate-100 flex flex-wrap items-center justify-between gap-2">
                     <span className="text-xs font-medium text-slate-600">
-                      Simulated Faculty Decision Controls:
+                      Faculty Decision:
                     </span>
                     <div className="flex flex-wrap items-center gap-2">
                       <button
@@ -271,7 +284,7 @@ export function RequestsView({
                         onClick={() => void applyDecision(req.id, 'approve')}
                         className="px-3 py-1.5 text-xs font-semibold text-white bg-emerald-700 hover:bg-emerald-800 disabled:opacity-60 rounded-lg cursor-pointer"
                       >
-                        Approve Access
+                        Approve
                       </button>
                       <button
                         type="button"
@@ -279,7 +292,7 @@ export function RequestsView({
                         onClick={() => void applyDecision(req.id, 'preempt_for_deadline')}
                         className="px-3 py-1.5 text-xs font-semibold text-white bg-blue-700 hover:bg-blue-800 disabled:opacity-60 rounded-lg cursor-pointer"
                       >
-                        Deadline Priority Approval
+                        Priority Approve
                       </button>
                       {req.status === 'pending_faculty' && (
                         <button
@@ -288,7 +301,7 @@ export function RequestsView({
                           onClick={() => void applyDecision(req.id, 'request_orientation')}
                           className="px-3 py-1.5 text-xs font-semibold text-amber-900 bg-amber-100 hover:bg-amber-200 disabled:opacity-60 rounded-lg cursor-pointer"
                         >
-                          Require Safety Briefing
+                          Safety Briefing
                         </button>
                       )}
                       <button

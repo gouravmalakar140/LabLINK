@@ -1,6 +1,7 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { ArrowRight, ChevronDown, ChevronUp, Cpu, RotateCcw, Wrench } from 'lucide-react';
-import type { CampusUtilizationSummary, LabStation } from '../types/lablink.ts';
+import type { CampusUtilizationSummary, Department, LabStation } from '../types/lablink.ts';
+import { formatHour, formatHourRange } from '../utils/format.ts';
 
 interface UtilizationViewProps {
   utilization: CampusUtilizationSummary;
@@ -12,6 +13,13 @@ interface UtilizationViewProps {
   resetting: boolean;
 }
 
+const QUICK_HOURS = [
+  { hour: 10, label: '10:00' },
+  { hour: 14, label: '14:00 Peak' },
+  { hour: 16, label: '16:00' },
+  { hour: 18, label: '18:00' },
+];
+
 export function UtilizationView({
   utilization,
   stations,
@@ -22,6 +30,28 @@ export function UtilizationView({
   resetting,
 }: UtilizationViewProps) {
   const [expandedStationId, setExpandedStationId] = useState<string | null>(null);
+  const [metricMode, setMetricMode] = useState<'pct' | 'hours'>('pct');
+  const [selectedDeptFilter, setSelectedDeptFilter] = useState<Department | null>(null);
+
+  const stationById = useMemo(() => {
+    const map = new Map<string, LabStation>();
+    for (const s of stations) {
+      map.set(s.id, s);
+    }
+    return map;
+  }, [stations]);
+
+  const visibleOccupancy = useMemo(() => {
+    if (!selectedDeptFilter) return utilization.stationOccupancy;
+    return utilization.stationOccupancy.filter((row) => row.department === selectedDeptFilter);
+  }, [utilization.stationOccupancy, selectedDeptFilter]);
+
+  const maxHours = useMemo(() => {
+    return Math.max(
+      1,
+      ...utilization.departmentMetrics.map((d) => d.sharedHoursUnlocked)
+    );
+  }, [utilization.departmentMetrics]);
 
   const toggleExpand = (stationId: string) => {
     setExpandedStationId((prev) => (prev === stationId ? null : stationId));
@@ -29,13 +59,13 @@ export function UtilizationView({
 
   return (
     <section className="space-y-6" aria-labelledby="utilization-heading">
-      <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 pb-6 border-b border-slate-200">
-        <div className="max-w-2xl">
+      <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 pb-5 border-b border-slate-200">
+        <div>
           <h1 id="utilization-heading" className="text-2xl sm:text-3xl font-bold text-slate-900">
-            Cross-Department Utilization & Idle Capacity Matrix
+            Campus Lab Utilization
           </h1>
-          <p className="text-sm sm:text-base text-slate-600 mt-1.5">
-            Quantifying how routing students into idle wet-lab compute bays and off-peak fabrication stations relieves departmental bottlenecks.
+          <p className="text-sm text-slate-600 mt-1">
+            Tap a department to filter labs, or scrub hours to see open bays live.
           </p>
         </div>
 
@@ -46,132 +76,192 @@ export function UtilizationView({
           className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-slate-700 bg-white border border-slate-300 hover:bg-slate-50 disabled:opacity-60 rounded-lg cursor-pointer whitespace-nowrap shrink-0 w-fit"
         >
           <RotateCcw className="w-3.5 h-3.5" aria-hidden="true" />
-          <span>{resetting ? 'Resetting…' : 'Reset Demo Data'}</span>
+          <span>{resetting ? 'Resetting…' : 'Reset Demo'}</span>
         </button>
       </div>
 
-      {/* Department-by-Department Siloed vs Hybrid Gains */}
-      <div className="bg-white border border-slate-200 rounded-xl p-6 space-y-5">
-        <div className="flex flex-wrap items-center justify-between gap-4">
+      {/* Interactive Department Gain Comparison */}
+      <div className="bg-white border border-slate-200 rounded-xl p-5 space-y-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <h2 className="text-base font-semibold text-slate-900">
-              Siloed Baseline vs. Hybrid Sharing Utilization
+              Department Sharing Impact
             </h2>
-            <p className="text-xs text-slate-600 mt-0.5">
-              Biotech, Aero/Mech, and Electronics unlock idle workstation hours while relieving CS annex congestion.
+            <p className="text-xs text-slate-600">
+              {selectedDeptFilter
+                ? `Filtered to ${selectedDeptFilter} below — click again to show all.`
+                : 'Click any department row to filter the station inspector below.'}
             </p>
           </div>
-          <div className="flex items-center gap-4 text-xs text-slate-600">
-            <span className="inline-flex items-center gap-1.5">
-              <span className="w-3 h-3 rounded-sm bg-slate-300 inline-block" aria-hidden="true" />
-              Siloed Baseline
-            </span>
-            <span className="inline-flex items-center gap-1.5">
-              <span className="w-3 h-3 rounded-sm bg-blue-700 inline-block" aria-hidden="true" />
-              With LabLink Hybrid Sharing
-            </span>
+
+          <div className="flex items-center gap-1 p-1 bg-slate-100 rounded-lg">
+            <button
+              type="button"
+              onClick={() => setMetricMode('pct')}
+              className={`px-3 py-1.5 text-xs font-semibold rounded-md cursor-pointer transition-colors whitespace-nowrap ${
+                metricMode === 'pct'
+                  ? 'bg-white text-slate-900 shadow-sm'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              Utilization %
+            </button>
+            <button
+              type="button"
+              onClick={() => setMetricMode('hours')}
+              className={`px-3 py-1.5 text-xs font-semibold rounded-md cursor-pointer transition-colors whitespace-nowrap ${
+                metricMode === 'hours'
+                  ? 'bg-white text-slate-900 shadow-sm'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              Hours Unlocked
+            </button>
           </div>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          {utilization.departmentMetrics.map((dept) => (
-            <div
-              key={dept.department}
-              className="p-4 border border-slate-200 rounded-lg space-y-3 bg-slate-50/60"
-            >
-              <div className="flex items-center justify-between">
-                <h3 className="text-sm font-semibold text-slate-900">{dept.department}</h3>
-                <span className="font-mono tabular-nums text-xs font-semibold text-emerald-700">
-                  +{dept.sharedHoursUnlocked} hrs/wk shared
-                </span>
-              </div>
+        <div className="divide-y divide-slate-100">
+          {utilization.departmentMetrics.map((dept) => {
+            const isSelected = selectedDeptFilter === dept.department;
+            const gainPct = Math.max(0, dept.hybridUtilizationPct - dept.siloedUtilizationPct);
 
-              <div className="space-y-2">
-                <div className="space-y-1">
-                  <div className="flex justify-between text-xs text-slate-600">
-                    <span>Siloed Single-Dept Usage</span>
-                    <span className="font-mono tabular-nums font-medium">
-                      {dept.siloedUtilizationPct}%
-                    </span>
-                  </div>
-                  <div className="h-2.5 bg-slate-200 rounded-full overflow-hidden">
-                    <div
-                      className="h-full bg-slate-400 rounded-full"
-                      style={{ width: `${dept.siloedUtilizationPct}%` }}
-                    />
-                  </div>
+            return (
+              <button
+                key={dept.department}
+                type="button"
+                onClick={() =>
+                  setSelectedDeptFilter((prev) =>
+                    prev === dept.department ? null : dept.department
+                  )
+                }
+                aria-pressed={isSelected}
+                className={`w-full text-left py-3 px-3 -mx-3 rounded-lg transition-colors cursor-pointer flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-4 ${
+                  isSelected ? 'bg-blue-50/80' : 'hover:bg-slate-50'
+                }`}
+              >
+                <div className="sm:w-36 shrink-0 flex items-center justify-between sm:block">
+                  <span className="text-sm font-semibold text-slate-900">{dept.department}</span>
+                  <span className="sm:hidden font-mono tabular-nums text-xs font-semibold text-blue-700">
+                    {metricMode === 'pct'
+                      ? `${dept.siloedUtilizationPct}% → ${dept.hybridUtilizationPct}%`
+                      : `+${dept.sharedHoursUnlocked} hrs/wk`}
+                  </span>
                 </div>
 
-                <div className="space-y-1">
-                  <div className="flex justify-between text-xs text-slate-800 font-medium">
-                    <span>LabLink Hybrid Utilization</span>
-                    <span className="font-mono tabular-nums font-semibold text-blue-700">
-                      {dept.hybridUtilizationPct}%
-                    </span>
-                  </div>
-                  <div className="h-2.5 bg-slate-200 rounded-full overflow-hidden">
-                    <div
-                      className="h-full bg-blue-700 rounded-full"
-                      style={{ width: `${dept.hybridUtilizationPct}%` }}
-                    />
-                  </div>
+                <div className="flex-1">
+                  {metricMode === 'pct' ? (
+                    <div className="h-3 bg-slate-100 rounded-full overflow-hidden flex" aria-hidden="true">
+                      <div
+                        className="h-full bg-slate-300 transition-all duration-200"
+                        style={{ width: `${dept.siloedUtilizationPct}%` }}
+                        title={`Siloed: ${dept.siloedUtilizationPct}%`}
+                      />
+                      <div
+                        className="h-full bg-blue-700 transition-all duration-200"
+                        style={{ width: `${gainPct}%` }}
+                        title={`LabLink Hybrid: ${dept.hybridUtilizationPct}%`}
+                      />
+                    </div>
+                  ) : (
+                    <div className="h-3 bg-slate-100 rounded-full overflow-hidden" aria-hidden="true">
+                      <div
+                        className="h-full bg-emerald-600 rounded-full transition-all duration-200"
+                        style={{ width: `${Math.round((dept.sharedHoursUnlocked / maxHours) * 100)}%` }}
+                      />
+                    </div>
+                  )}
                 </div>
-              </div>
 
-              <div className="pt-2 border-t border-slate-200 flex items-center justify-between text-xs text-slate-600">
-                <span>
-                  Cross-dept sessions hosted:{' '}
-                  <strong className="font-mono tabular-nums text-slate-900">
-                    {dept.crossDeptHostedSessions}
-                  </strong>
-                </span>
-                <span>
-                  Peak relief:{' '}
-                  <strong className="font-mono tabular-nums text-slate-900">
-                    {dept.bottleneckReliefPct}%
-                  </strong>
-                </span>
-              </div>
-            </div>
-          ))}
+                <div className="hidden sm:block sm:w-36 text-right font-mono tabular-nums text-xs font-semibold shrink-0">
+                  {metricMode === 'pct' ? (
+                    <span>
+                      <span className="text-slate-500">{dept.siloedUtilizationPct}%</span>
+                      <span className="mx-1 text-slate-400">→</span>
+                      <span className="text-blue-700">{dept.hybridUtilizationPct}%</span>
+                    </span>
+                  ) : (
+                    <span className="text-emerald-700">+{dept.sharedHoursUnlocked} hrs/wk</span>
+                  )}
+                </div>
+              </button>
+            );
+          })}
         </div>
+
+        {metricMode === 'pct' && (
+          <div className="flex items-center gap-4 pt-1 text-xs text-slate-500">
+            <span className="inline-flex items-center gap-1.5">
+              <span className="w-2.5 h-2.5 rounded-sm bg-slate-300 inline-block" aria-hidden="true" />
+              Siloed
+            </span>
+            <span className="inline-flex items-center gap-1.5">
+              <span className="w-2.5 h-2.5 rounded-sm bg-blue-700 inline-block" aria-hidden="true" />
+              With LabLink
+            </span>
+          </div>
+        )}
       </div>
 
       {/* Live Hour-by-Hour Station Occupancy Inspector */}
       <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
-        <div className="p-5 border-b border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-          <div>
+        <div className="p-5 border-b border-slate-200 flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+          <div className="flex flex-wrap items-center gap-2">
             <h2 className="text-base font-semibold text-slate-900">
               Station Occupancy Inspector
             </h2>
-            <p className="text-xs text-slate-600 mt-0.5">
-              Scrub campus hours to inspect active wet-lab/theory idle windows and cross-department bay openings.
-            </p>
+            {selectedDeptFilter && (
+              <button
+                type="button"
+                onClick={() => setSelectedDeptFilter(null)}
+                className="text-xs font-semibold text-blue-700 hover:text-blue-800 underline underline-offset-2 cursor-pointer"
+              >
+                Clear {selectedDeptFilter} filter
+              </button>
+            )}
           </div>
 
-          <div className="flex items-center gap-3">
-            <label htmlFor="hour-inspector" className="text-xs font-semibold text-slate-700 whitespace-nowrap">
-              Campus Hour:
-            </label>
-            <select
-              id="hour-inspector"
-              value={selectedHour}
-              onChange={(e) => onHourChange(Number(e.target.value))}
-              className="min-h-[44px] sm:min-h-0 px-3 py-1.5 text-sm font-mono tabular-nums bg-white border border-slate-300 rounded-lg text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-700"
-            >
-              {Array.from({ length: 13 }, (_, i) => i + 8).map((h) => (
-                <option key={h} value={h}>
-                  {String(h).padStart(2, '0')}:00 – {String(h + 1).padStart(2, '0')}:00
-                </option>
+          <div className="flex flex-wrap items-center gap-3">
+            <div className="flex items-center gap-1 p-1 bg-slate-100 rounded-lg">
+              {QUICK_HOURS.map((item) => (
+                <button
+                  key={item.hour}
+                  type="button"
+                  onClick={() => onHourChange(item.hour)}
+                  className={`px-2.5 py-1 text-xs font-mono tabular-nums font-semibold rounded-md cursor-pointer transition-colors whitespace-nowrap ${
+                    selectedHour === item.hour
+                      ? 'bg-white text-slate-900 shadow-sm'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  {item.label}
+                </button>
               ))}
-            </select>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <label htmlFor="hour-inspector" className="sr-only">
+                Campus Hour
+              </label>
+              <select
+                id="hour-inspector"
+                value={selectedHour}
+                onChange={(e) => onHourChange(Number(e.target.value))}
+                className="min-h-[44px] sm:min-h-0 px-3 py-1.5 text-xs font-mono tabular-nums bg-white border border-slate-300 rounded-lg text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-700"
+              >
+                {Array.from({ length: 13 }, (_, i) => i + 8).map((h) => (
+                  <option key={h} value={h}>
+                    {formatHourRange(h, h + 1)}
+                  </option>
+                ))}
+              </select>
+            </div>
           </div>
         </div>
 
-        {/* Mobile-Only Inspector Layout (Android 13-16 & iOS optimized) */}
+        {/* Mobile-Only Inspector Layout (Android 13-16 & iOS optimized: Station Code + Department Name + More button) */}
         <div className="md:hidden divide-y divide-slate-200">
-          {utilization.stationOccupancy.map((row) => {
-            const station = stations.find((s) => s.id === row.stationId);
+          {visibleOccupancy.map((row) => {
+            const station = stationById.get(row.stationId);
             const isExpanded = expandedStationId === row.stationId;
             const activeWindow = station?.idleWindows.find(
               (w) => w.startHour <= selectedHour && selectedHour < w.endHour
@@ -179,7 +269,6 @@ export function UtilizationView({
 
             return (
               <div key={row.stationId} className="bg-white">
-                {/* Main Row: Only Station Code + Department Name on left, Occupancy + 'More' button beside it */}
                 <div className="px-4 py-3.5 flex items-center justify-between gap-3">
                   <div className="min-w-0 flex-1">
                     <p className="font-mono tabular-nums text-base font-bold text-slate-900">
@@ -225,7 +314,6 @@ export function UtilizationView({
                   </div>
                 </div>
 
-                {/* Expandable Specialization & Booking Panel */}
                 {isExpanded && station && (
                   <div
                     id={`mobile-station-more-${row.stationId}`}
@@ -238,13 +326,13 @@ export function UtilizationView({
                       </p>
                     </div>
 
-                    <div className="space-y-2.5 text-xs">
+                    <div className="space-y-2 text-xs">
                       <div>
                         <p className="font-semibold text-slate-700 flex items-center gap-1.5">
                           <Wrench className="w-3.5 h-3.5 text-slate-600 shrink-0" aria-hidden="true" />
-                          <span>Primary Specialization ({station.primaryTrack.title})</span>
+                          <span>Primary: {station.primaryTrack.title}</span>
                         </p>
-                        <p className="text-slate-600 mt-0.5 leading-relaxed">
+                        <p className="text-slate-600 mt-0.5">
                           {station.primaryTrack.equipment.join(' · ')}
                         </p>
                       </div>
@@ -252,21 +340,14 @@ export function UtilizationView({
                       <div>
                         <p className="font-semibold text-blue-800 flex items-center gap-1.5">
                           <Cpu className="w-3.5 h-3.5 text-blue-700 shrink-0" aria-hidden="true" />
-                          <span>Shareable Cross-Dept Bays ({station.shareableTrack.title})</span>
+                          <span>Shareable: {station.shareableTrack.title}</span>
                         </p>
                         <p className="text-slate-700 mt-0.5">{station.shareableTrack.specs}</p>
-                        <p className="text-slate-600 mt-0.5">
-                          Tools: {station.shareableTrack.software.join(', ')}
-                        </p>
                       </div>
 
-                      {activeWindow ? (
-                        <p className="text-emerald-800 font-medium pt-1">
-                          Active at {String(selectedHour).padStart(2, '0')}:00: {activeWindow.primaryActivity}
-                        </p>
-                      ) : (
-                        <p className="text-slate-600 pt-1">
-                          Standard cross-department schedule at {String(selectedHour).padStart(2, '0')}:00.
+                      {activeWindow && (
+                        <p className="text-emerald-800 font-medium">
+                          {formatHour(selectedHour)}: {activeWindow.primaryActivity}
                         </p>
                       )}
                     </div>
@@ -286,47 +367,62 @@ export function UtilizationView({
           })}
         </div>
 
-        {/* Desktop Table Layout (unchanged for >= md viewports) */}
+        {/* Desktop Interactive Table */}
         <div className="hidden md:block overflow-x-auto">
           <table className="w-full text-left border-collapse">
             <thead>
               <tr className="border-b border-slate-200 bg-slate-50 text-xs font-semibold text-slate-600">
                 <th className="py-3 px-4">Station</th>
                 <th className="py-3 px-4">Department</th>
-                <th className="py-3 px-4">Active Idle Window</th>
+                <th className="py-3 px-4">Window</th>
                 <th className="py-3 px-4 text-right">Booked</th>
-                <th className="py-3 px-4 text-right">Idle Bays Open</th>
+                <th className="py-3 px-4 text-right">Open</th>
+                <th className="py-3 px-4 text-right">Action</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-200 text-sm">
-              {utilization.stationOccupancy.map((row) => (
-                <tr key={row.stationId} className="hover:bg-slate-50/70">
-                  <td className="py-3 px-4">
-                    <span className="font-mono tabular-nums font-semibold text-slate-900 mr-2">
-                      {row.code}
-                    </span>
-                    <span className="text-slate-700">{row.name}</span>
-                  </td>
-                  <td className="py-3 px-4 text-slate-700">{row.department}</td>
-                  <td className="py-3 px-4 text-xs">
-                    {row.activeIdleWindowLabel ? (
-                      <span className="font-medium text-emerald-700">
-                        {row.activeIdleWindowLabel}
+              {visibleOccupancy.map((row) => {
+                const station = stationById.get(row.stationId);
+                return (
+                  <tr key={row.stationId} className="hover:bg-slate-50/70">
+                    <td className="py-3 px-4">
+                      <span className="font-mono tabular-nums font-semibold text-slate-900 mr-2">
+                        {row.code}
                       </span>
-                    ) : (
-                      <span className="text-slate-500">Standard schedule</span>
-                    )}
-                  </td>
-                  <td className="py-3 px-4 text-right font-mono tabular-nums text-slate-800">
-                    {row.bookedSeatsToday} / {row.totalCrossDeptSeats}
-                  </td>
-                  <td className="py-3 px-4 text-right font-mono tabular-nums font-semibold">
-                    <span className={row.crossDeptIdleNow === 0 ? 'text-rose-700' : 'text-emerald-700'}>
-                      {row.crossDeptIdleNow}
-                    </span>
-                  </td>
-                </tr>
-              ))}
+                      <span className="text-slate-700">{row.name}</span>
+                    </td>
+                    <td className="py-3 px-4 text-slate-700">{row.department}</td>
+                    <td className="py-3 px-4 text-xs">
+                      {row.activeIdleWindowLabel ? (
+                        <span className="font-medium text-emerald-700">
+                          {row.activeIdleWindowLabel}
+                        </span>
+                      ) : (
+                        <span className="text-slate-500">Standard</span>
+                      )}
+                    </td>
+                    <td className="py-3 px-4 text-right font-mono tabular-nums text-slate-800">
+                      {row.bookedSeatsToday} / {row.totalCrossDeptSeats}
+                    </td>
+                    <td className="py-3 px-4 text-right font-mono tabular-nums font-semibold">
+                      <span className={row.crossDeptIdleNow === 0 ? 'text-rose-700' : 'text-emerald-700'}>
+                        {row.crossDeptIdleNow}
+                      </span>
+                    </td>
+                    <td className="py-3 px-4 text-right">
+                      {station && (
+                        <button
+                          type="button"
+                          onClick={() => onBookStation(station)}
+                          className="text-xs font-semibold text-blue-700 hover:text-blue-800 hover:underline cursor-pointer"
+                        >
+                          {row.crossDeptIdleNow === 0 ? 'Resolve AI' : 'Book'}
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>

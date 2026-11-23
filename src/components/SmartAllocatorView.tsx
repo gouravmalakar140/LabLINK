@@ -4,6 +4,8 @@ import {
   AlertTriangle,
   ArrowRight,
   CheckCircle2,
+  ChevronDown,
+  ChevronUp,
   RefreshCw,
   Sparkles,
 } from 'lucide-react';
@@ -15,21 +17,13 @@ import type {
   LabStation,
 } from '../types/lablink.ts';
 import type { ConflictPrefill } from './BookingModal.tsx';
+import { addDaysIso, DEPARTMENTS, formatHour, formatHourRange } from '../utils/format.ts';
 
 interface SmartAllocatorViewProps {
   stations: LabStation[];
   todayDate: string;
   prefill: ConflictPrefill | null;
   onReserveSuccess: (request: BookingRequest) => void;
-}
-
-const DEPARTMENTS: Department[] = ['CS & AI', 'Biotech', 'Aero & Mech', 'Electronics'];
-
-function addDays(isoDate: string, days: number): string {
-  const [y, m, d] = isoDate.split('-').map(Number);
-  const dt = new Date(y, m - 1, d);
-  dt.setDate(dt.getDate() + days);
-  return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`;
 }
 
 export function SmartAllocatorView({
@@ -50,13 +44,17 @@ export function SmartAllocatorView({
     prefill?.requiredSpecs ?? 'RTX 4080, CUDA 12, PyTorch, 32GB+ RAM'
   );
   const [projectDeadline, setProjectDeadline] = useState(
-    prefill?.projectDeadline ?? addDays(todayDate, 1)
+    prefill?.projectDeadline ?? addDaysIso(todayDate, 1)
   );
   const [date, setDate] = useState(prefill?.date ?? todayDate);
   const [startHour, setStartHour] = useState(prefill?.startHour ?? 14);
-  const [endHour, setEndHour] = useState(prefill?.endHour ?? 16);
+  const [duration, setDuration] = useState(
+    prefill ? Math.max(1, Math.min(3, prefill.endHour - prefill.startHour)) : 2
+  );
   const [seatsRequested, setSeatsRequested] = useState(prefill?.seatsRequested ?? 2);
 
+  const [detailsOpen, setDetailsOpen] = useState(false);
+  const [expandedRecId, setExpandedRecId] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [reservingId, setReservingId] = useState<string | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -64,6 +62,8 @@ export function SmartAllocatorView({
     conflictReason: string | null;
     allocation: AiAllocationResponse;
   } | null>(null);
+
+  const endHour = Math.min(21, startHour + duration);
 
   const runAllocator = async (overrideParams?: {
     stationId: string;
@@ -129,7 +129,7 @@ export function SmartAllocatorView({
       setProjectDeadline(prefill.projectDeadline);
       setDate(prefill.date);
       setStartHour(prefill.startHour);
-      setEndHour(prefill.endHour);
+      setDuration(Math.max(1, Math.min(3, prefill.endHour - prefill.startHour)));
       setSeatsRequested(prefill.seatsRequested);
       void runAllocator({
         stationId: prefill.stationId,
@@ -148,79 +148,60 @@ export function SmartAllocatorView({
   }, [prefill]);
 
   const applyScenarioPreset = (preset: 'cs_to_bio' | 'cs_to_mech' | 'mech_to_cs') => {
-    if (preset === 'cs_to_bio') {
-      const next = {
+    const presets = {
+      cs_to_bio: {
         stationId: 'cs-102',
         studentName: 'Ananya Rao',
         studentDepartment: 'CS & AI' as Department,
         projectTitle: 'Multi-Modal Capstone Model Fine-Tuning',
         requiredSpecs: 'RTX 4080, CUDA 12, PyTorch, Python 3.12',
-        projectDeadline: addDays(todayDate, 1),
+        projectDeadline: addDaysIso(todayDate, 1),
         date: todayDate,
         startHour: 14,
-        endHour: 16,
+        duration: 2,
         seatsRequested: 2,
-      };
-      setStationId(next.stationId);
-      setStudentName(next.studentName);
-      setStudentDepartment(next.studentDepartment);
-      setProjectTitle(next.projectTitle);
-      setRequiredSpecs(next.requiredSpecs);
-      setProjectDeadline(next.projectDeadline);
-      setDate(next.date);
-      setStartHour(next.startHour);
-      setEndHour(next.endHour);
-      setSeatsRequested(next.seatsRequested);
-      void runAllocator(next);
-    } else if (preset === 'cs_to_mech') {
-      const next = {
+      },
+      cs_to_mech: {
         stationId: 'cs-310',
         studentName: 'Siddharth Nair',
         studentDepartment: 'CS & AI' as Department,
         projectTitle: 'Autonomous Delivery Bot Physical Enclosure & CAD',
         requiredSpecs: 'SolidWorks 2025, Fusion 360, Laser Cutter, Assembly Bay',
-        projectDeadline: addDays(todayDate, 2),
+        projectDeadline: addDaysIso(todayDate, 2),
         date: todayDate,
         startHour: 16,
-        endHour: 18,
+        duration: 2,
         seatsRequested: 2,
-      };
-      setStationId(next.stationId);
-      setStudentName(next.studentName);
-      setStudentDepartment(next.studentDepartment);
-      setProjectTitle(next.projectTitle);
-      setRequiredSpecs(next.requiredSpecs);
-      setProjectDeadline(next.projectDeadline);
-      setDate(next.date);
-      setStartHour(next.startHour);
-      setEndHour(next.endHour);
-      setSeatsRequested(next.seatsRequested);
-      void runAllocator(next);
-    } else {
-      const next = {
+      },
+      mech_to_cs: {
         stationId: 'aero-108',
         studentName: 'Tanvi Deshpande',
         studentDepartment: 'Aero & Mech' as Department,
         projectTitle: 'CFD Turbulence Mesh Post-Processing with PyTorch',
         requiredSpecs: 'ANSYS Fluent, MATLAB Simulink, A100 / ROS2 Gazebo',
-        projectDeadline: addDays(todayDate, 2),
+        projectDeadline: addDaysIso(todayDate, 2),
         date: todayDate,
         startHour: 13,
-        endHour: 15,
+        duration: 2,
         seatsRequested: 2,
-      };
-      setStationId(next.stationId);
-      setStudentName(next.studentName);
-      setStudentDepartment(next.studentDepartment);
-      setProjectTitle(next.projectTitle);
-      setRequiredSpecs(next.requiredSpecs);
-      setProjectDeadline(next.projectDeadline);
-      setDate(next.date);
-      setStartHour(next.startHour);
-      setEndHour(next.endHour);
-      setSeatsRequested(next.seatsRequested);
-      void runAllocator(next);
-    }
+      },
+    };
+
+    const next = presets[preset];
+    setStationId(next.stationId);
+    setStudentName(next.studentName);
+    setStudentDepartment(next.studentDepartment);
+    setProjectTitle(next.projectTitle);
+    setRequiredSpecs(next.requiredSpecs);
+    setProjectDeadline(next.projectDeadline);
+    setDate(next.date);
+    setStartHour(next.startHour);
+    setDuration(next.duration);
+    setSeatsRequested(next.seatsRequested);
+    void runAllocator({
+      ...next,
+      endHour: next.startHour + next.duration,
+    });
   };
 
   const handleReserveRecommendation = async (rec: AiRecommendationItem) => {
@@ -263,14 +244,13 @@ export function SmartAllocatorView({
 
   return (
     <section className="space-y-6" aria-labelledby="allocator-heading">
-      <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 pb-6 border-b border-slate-200">
-        <div className="max-w-2xl">
+      <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 pb-5 border-b border-slate-200">
+        <div className="max-w-xl">
           <h1 id="allocator-heading" className="text-2xl sm:text-3xl font-bold text-slate-900">
-            GenAI Conflict Resolution & Cross-Department Allocator
+            Smart Conflict Allocator
           </h1>
-          <p className="text-sm sm:text-base text-slate-600 mt-1.5">
-            When primary labs reach peak congestion, Gemini 4 Hydrogen evaluates project deadlines,
-            technical specs, and active wet-lab or theory schedules to route students to idle bays across campus.
+          <p className="text-sm text-slate-600 mt-1">
+            When your preferred lab is full, Gemini ranks open cross-department bays by specs and deadline.
           </p>
         </div>
 
@@ -280,27 +260,27 @@ export function SmartAllocatorView({
             onClick={() => applyScenarioPreset('cs_to_bio')}
             className="px-3 py-1.5 text-xs font-medium bg-white border border-slate-300 hover:bg-slate-50 text-slate-800 rounded-lg cursor-pointer whitespace-nowrap"
           >
-            Preset: CS GPU → Biotech Idle Bay
+            CS GPU → Biotech
           </button>
           <button
             type="button"
             onClick={() => applyScenarioPreset('cs_to_mech')}
             className="px-3 py-1.5 text-xs font-medium bg-white border border-slate-300 hover:bg-slate-50 text-slate-800 rounded-lg cursor-pointer whitespace-nowrap"
           >
-            Preset: CS Hardware → Mech/Aero Bay
+            CS Hardware → Mech
           </button>
           <button
             type="button"
             onClick={() => applyScenarioPreset('mech_to_cs')}
             className="px-3 py-1.5 text-xs font-medium bg-white border border-slate-300 hover:bg-slate-50 text-slate-800 rounded-lg cursor-pointer whitespace-nowrap"
           >
-            Preset: Aero CFD → Robotics Hub
+            Aero CFD → Robotics
           </button>
         </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-        {/* Left Parameter Form */}
+        {/* Streamlined Left Parameter Form */}
         <form
           onSubmit={(e) => {
             e.preventDefault();
@@ -308,13 +288,11 @@ export function SmartAllocatorView({
           }}
           className="lg:col-span-5 bg-white border border-slate-200 rounded-xl p-5 space-y-4"
         >
-          <h2 className="text-base font-semibold text-slate-900">
-            Project Constraints & Target Window
-          </h2>
+          <h2 className="text-base font-semibold text-slate-900">Your Request</h2>
 
           <div>
             <label htmlFor="alloc-station" className="block text-xs font-semibold text-slate-700 mb-1">
-              Preferred (Or Saturated) Station
+              Preferred Station
             </label>
             <select
               id="alloc-station"
@@ -330,56 +308,9 @@ export function SmartAllocatorView({
             </select>
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label htmlFor="alloc-name" className="block text-xs font-semibold text-slate-700 mb-1">
-                Student Name
-              </label>
-              <input
-                id="alloc-name"
-                type="text"
-                required
-                value={studentName}
-                onChange={(e) => setStudentName(e.target.value)}
-                className="w-full px-3 py-2 text-sm bg-white border border-slate-300 rounded-lg text-slate-900"
-              />
-            </div>
-            <div>
-              <label htmlFor="alloc-dept" className="block text-xs font-semibold text-slate-700 mb-1">
-                Home Department
-              </label>
-              <select
-                id="alloc-dept"
-                value={studentDepartment}
-                onChange={(e) => setStudentDepartment(e.target.value as Department)}
-                className="w-full px-3 py-2 text-sm bg-white border border-slate-300 rounded-lg text-slate-900"
-              >
-                {DEPARTMENTS.map((d) => (
-                  <option key={d} value={d}>
-                    {d}
-                  </option>
-                ))}
-              </select>
-            </div>
-          </div>
-
-          <div>
-            <label htmlFor="alloc-project" className="block text-xs font-semibold text-slate-700 mb-1">
-              Project Title
-            </label>
-            <input
-              id="alloc-project"
-              type="text"
-              required
-              value={projectTitle}
-              onChange={(e) => setProjectTitle(e.target.value)}
-              className="w-full px-3 py-2 text-sm bg-white border border-slate-300 rounded-lg text-slate-900"
-            />
-          </div>
-
           <div>
             <label htmlFor="alloc-specs" className="block text-xs font-semibold text-slate-700 mb-1">
-              Required Compute, Software, or Equipment
+              Required Tools or Hardware
             </label>
             <input
               id="alloc-specs"
@@ -393,21 +324,8 @@ export function SmartAllocatorView({
 
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label htmlFor="alloc-deadline" className="block text-xs font-semibold text-slate-700 mb-1">
-                Project Deadline
-              </label>
-              <input
-                id="alloc-deadline"
-                type="date"
-                required
-                value={projectDeadline}
-                onChange={(e) => setProjectDeadline(e.target.value)}
-                className="w-full px-3 py-2 text-sm font-mono tabular-nums bg-white border border-slate-300 rounded-lg text-slate-900"
-              />
-            </div>
-            <div>
               <label htmlFor="alloc-date" className="block text-xs font-semibold text-slate-700 mb-1">
-                Target Session Date
+                Date
               </label>
               <input
                 id="alloc-date"
@@ -418,52 +336,49 @@ export function SmartAllocatorView({
                 className="w-full px-3 py-2 text-sm font-mono tabular-nums bg-white border border-slate-300 rounded-lg text-slate-900"
               />
             </div>
-          </div>
-
-          <div className="grid grid-cols-3 gap-3">
             <div>
               <label htmlFor="alloc-start" className="block text-xs font-semibold text-slate-700 mb-1">
-                Start
+                Start Time
               </label>
               <select
                 id="alloc-start"
                 value={startHour}
-                onChange={(e) => {
-                  const next = Number(e.target.value);
-                  setStartHour(next);
-                  if (endHour <= next) setEndHour(Math.min(21, next + 2));
-                }}
+                onChange={(e) => setStartHour(Number(e.target.value))}
                 className="w-full px-3 py-2 text-sm font-mono tabular-nums bg-white border border-slate-300 rounded-lg"
               >
                 {Array.from({ length: 13 }, (_, i) => i + 8).map((h) => (
                   <option key={h} value={h}>
-                    {String(h).padStart(2, '0')}:00
+                    {formatHour(h)}
                   </option>
                 ))}
               </select>
             </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3 items-end">
             <div>
-              <label htmlFor="alloc-end" className="block text-xs font-semibold text-slate-700 mb-1">
-                End
-              </label>
-              <select
-                id="alloc-end"
-                value={endHour}
-                onChange={(e) => setEndHour(Number(e.target.value))}
-                className="w-full px-3 py-2 text-sm font-mono tabular-nums bg-white border border-slate-300 rounded-lg"
-              >
-                {Array.from({ length: 13 }, (_, i) => i + 9)
-                  .filter((h) => h > startHour && h <= 21)
-                  .map((h) => (
-                    <option key={h} value={h}>
-                      {String(h).padStart(2, '0')}:00
-                    </option>
-                  ))}
-              </select>
+              <span className="block text-xs font-semibold text-slate-700 mb-1">Duration</span>
+              <div className="grid grid-cols-3 gap-1 p-1 bg-slate-100 rounded-lg">
+                {[1, 2, 3].map((hrs) => (
+                  <button
+                    key={hrs}
+                    type="button"
+                    onClick={() => setDuration(hrs)}
+                    className={`py-1.5 text-xs font-mono tabular-nums font-semibold rounded-md cursor-pointer transition-colors ${
+                      duration === hrs
+                        ? 'bg-white text-slate-900 shadow-sm'
+                        : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    {hrs}h
+                  </button>
+                ))}
+              </div>
             </div>
+
             <div>
               <label htmlFor="alloc-seats" className="block text-xs font-semibold text-slate-700 mb-1">
-                Bays
+                Bays Needed
               </label>
               <input
                 id="alloc-seats"
@@ -477,17 +392,106 @@ export function SmartAllocatorView({
             </div>
           </div>
 
+          {/* Progressive Disclosure for Student & Deadline Details */}
+          <div className="border-t border-slate-100 pt-3">
+            <button
+              type="button"
+              onClick={() => setDetailsOpen((prev) => !prev)}
+              aria-expanded={detailsOpen}
+              className="w-full flex items-center justify-between gap-2 text-xs text-slate-600 hover:text-slate-900 py-1 cursor-pointer"
+            >
+              <span className="truncate">
+                <strong className="text-slate-800">{studentName}</strong> · {studentDepartment} · Due{' '}
+                <span className="font-mono tabular-nums">{projectDeadline}</span>
+              </span>
+              <span className="inline-flex items-center gap-1 font-semibold text-blue-700 shrink-0">
+                <span>{detailsOpen ? 'Hide' : 'Edit'}</span>
+                {detailsOpen ? (
+                  <ChevronUp className="w-3.5 h-3.5" aria-hidden="true" />
+                ) : (
+                  <ChevronDown className="w-3.5 h-3.5" aria-hidden="true" />
+                )}
+              </span>
+            </button>
+
+            {detailsOpen && (
+              <div className="mt-3 space-y-3">
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label htmlFor="alloc-name" className="block text-xs font-semibold text-slate-700 mb-1">
+                      Name
+                    </label>
+                    <input
+                      id="alloc-name"
+                      type="text"
+                      required
+                      value={studentName}
+                      onChange={(e) => setStudentName(e.target.value)}
+                      className="w-full px-3 py-2 text-sm bg-white border border-slate-300 rounded-lg text-slate-900"
+                    />
+                  </div>
+                  <div>
+                    <label htmlFor="alloc-dept" className="block text-xs font-semibold text-slate-700 mb-1">
+                      Department
+                    </label>
+                    <select
+                      id="alloc-dept"
+                      value={studentDepartment}
+                      onChange={(e) => setStudentDepartment(e.target.value as Department)}
+                      className="w-full px-3 py-2 text-sm bg-white border border-slate-300 rounded-lg text-slate-900"
+                    >
+                      {DEPARTMENTS.map((d) => (
+                        <option key={d} value={d}>
+                          {d}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label htmlFor="alloc-project" className="block text-xs font-semibold text-slate-700 mb-1">
+                      Project Title
+                    </label>
+                    <input
+                      id="alloc-project"
+                      type="text"
+                      required
+                      value={projectTitle}
+                      onChange={(e) => setProjectTitle(e.target.value)}
+                      className="w-full px-3 py-2 text-sm bg-white border border-slate-300 rounded-lg text-slate-900"
+                    />
+                  </div>
+                  <div>
+                    <label htmlFor="alloc-deadline" className="block text-xs font-semibold text-slate-700 mb-1">
+                      Project Deadline
+                    </label>
+                    <input
+                      id="alloc-deadline"
+                      type="date"
+                      required
+                      value={projectDeadline}
+                      onChange={(e) => setProjectDeadline(e.target.value)}
+                      className="w-full px-3 py-2 text-sm font-mono tabular-nums bg-white border border-slate-300 rounded-lg text-slate-900"
+                    />
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+
           <button
             type="submit"
             disabled={loading}
             className="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-semibold text-white bg-blue-700 hover:bg-blue-800 disabled:opacity-60 rounded-lg transition-colors cursor-pointer"
           >
             <Sparkles className="w-4 h-4" aria-hidden="true" />
-            <span>{loading ? 'Analyzing Campus Schedules…' : 'Find Fair Cross-Dept Allocations'}</span>
+            <span>{loading ? 'Finding Open Bays…' : 'Find Best Open Slots'}</span>
           </button>
         </form>
 
-        {/* Right Recommendations Stage */}
+        {/* Crisp Right Recommendations Stage */}
         <div className="lg:col-span-7 space-y-4">
           {errorMsg && (
             <div role="alert" className="p-4 bg-rose-50 border border-rose-200 rounded-xl flex items-start justify-between gap-3">
@@ -510,7 +514,7 @@ export function SmartAllocatorView({
           )}
 
           {loading ? (
-            <div className="space-y-4" aria-busy="true" aria-label="Loading AI recommendations">
+            <div className="space-y-3" aria-busy="true" aria-label="Loading AI recommendations">
               {[1, 2, 3].map((item) => (
                 <div
                   key={item}
@@ -518,122 +522,134 @@ export function SmartAllocatorView({
                 >
                   <div className="h-4 w-48 bg-slate-200 rounded" />
                   <div className="h-5 w-3/4 bg-slate-200 rounded" />
-                  <div className="h-12 w-full bg-slate-100 rounded" />
+                  <div className="h-10 w-full bg-slate-100 rounded" />
                 </div>
               ))}
             </div>
           ) : result ? (
             <div className="space-y-4">
               {result.conflictReason && (
-                <div className="p-4 bg-amber-50 border border-amber-200 rounded-xl flex items-start gap-2.5">
-                  <AlertTriangle className="w-5 h-5 text-amber-700 shrink-0 mt-0.5" aria-hidden="true" />
-                  <div className="text-sm text-amber-950">
-                    <p className="font-semibold">Primary Request Conflict</p>
-                    <p className="text-amber-900 mt-0.5">{result.conflictReason}</p>
-                  </div>
+                <div className="p-3.5 bg-amber-50 border border-amber-200 rounded-xl flex items-start gap-2.5">
+                  <AlertTriangle className="w-4 h-4 text-amber-700 shrink-0 mt-0.5" aria-hidden="true" />
+                  <p className="text-xs text-amber-950">
+                    <strong className="font-semibold">Conflict:</strong> {result.conflictReason}
+                  </p>
                 </div>
               )}
 
-              <div className="bg-white border border-slate-200 rounded-xl p-5 space-y-2">
-                <p className="text-xs font-semibold text-blue-700">Gemini 4 Hydrogen Allocation Summary</p>
+              <div className="bg-white border border-slate-200 rounded-xl p-4">
                 <p className="text-sm text-slate-900 font-medium leading-relaxed">
                   {result.allocation.summary}
-                </p>
-                <p className="text-xs text-slate-600 pt-1 border-t border-slate-100">
-                  <span className="font-semibold text-slate-700">Fairness Basis:</span>{' '}
-                  {result.allocation.fairnessPolicyNote}
                 </p>
               </div>
 
               {result.allocation.recommendations.length === 0 ? (
                 <div className="bg-white border border-slate-200 rounded-xl p-6 text-center space-y-2">
                   <p className="text-sm font-semibold text-slate-900">
-                    No matching open bays found for this exact seat count
+                    No open bays match {seatsRequested} seat(s) in this window
                   </p>
                   <p className="text-xs text-slate-600">
-                    Try requesting 1 workstation or adjusting your start hour on the left.
+                    Try requesting 1 bay or shifting your start time on the left.
                   </p>
                 </div>
               ) : (
                 <div className="space-y-3">
-                  {result.allocation.recommendations.map((rec, index) => (
-                    <article
-                      key={rec.candidateId}
-                      className="bg-white border border-slate-200 rounded-xl p-5 space-y-3"
-                    >
-                      <div className="flex flex-wrap items-start justify-between gap-3">
-                        <div>
-                          <div className="flex flex-wrap items-center gap-2 text-xs text-slate-600">
-                            <span className="font-semibold text-blue-700">
-                              Option {index + 1}
-                            </span>
-                            <span aria-hidden="true">·</span>
-                            <span className="font-mono tabular-nums font-semibold text-slate-900">
-                              {rec.stationCode}
-                            </span>
-                            <span aria-hidden="true">·</span>
-                            <span>{rec.stationDepartment}</span>
-                            <span aria-hidden="true">·</span>
-                            <span className="font-mono tabular-nums">
-                              {rec.date} {String(rec.startHour).padStart(2, '0')}:00–
-                              {String(rec.endHour).padStart(2, '0')}:00
-                            </span>
+                  {result.allocation.recommendations.map((rec, index) => {
+                    const isExpanded = expandedRecId === rec.candidateId;
+                    return (
+                      <article
+                        key={rec.candidateId}
+                        className="bg-white border border-slate-200 rounded-xl p-5 space-y-3"
+                      >
+                        <div className="flex flex-wrap items-start justify-between gap-3">
+                          <div>
+                            <div className="flex flex-wrap items-center gap-1.5 text-xs text-slate-600">
+                              <span className="font-semibold text-blue-700">
+                                #{index + 1}
+                              </span>
+                              <span aria-hidden="true">·</span>
+                              <span className="font-mono tabular-nums font-semibold text-slate-900">
+                                {rec.stationCode}
+                              </span>
+                              <span aria-hidden="true">·</span>
+                              <span>{rec.stationDepartment}</span>
+                              <span aria-hidden="true">·</span>
+                              <span className="font-mono tabular-nums font-medium text-slate-800">
+                                {formatHourRange(rec.startHour, rec.endHour)}
+                              </span>
+                            </div>
+                            <h3 className="text-base font-semibold text-slate-900 mt-1">
+                              {rec.stationName}
+                            </h3>
                           </div>
-                          <h3 className="text-base font-semibold text-slate-900 mt-1">
-                            {rec.stationName}
-                          </h3>
+
+                          <div className="text-right shrink-0">
+                            <p className="text-lg font-mono tabular-nums font-bold text-slate-900">
+                              {rec.fairnessScore}%
+                            </p>
+                            <p className="text-[11px] text-slate-500">Match</p>
+                          </div>
                         </div>
 
-                        <div className="text-right shrink-0">
-                          <p className="text-xs text-slate-500">Fairness Score</p>
-                          <p className="text-xl font-mono tabular-nums font-bold text-slate-900">
-                            {rec.fairnessScore}
-                            <span className="text-xs font-normal text-slate-500"> / 100</span>
-                          </p>
-                        </div>
-                      </div>
+                        <p className="text-xs text-slate-700 leading-relaxed">{rec.rationale}</p>
 
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2 border-t border-slate-100 text-xs">
-                        <div>
-                          <p className="font-semibold text-slate-700">Technical & Deadline Fit</p>
-                          <p className="text-slate-600 mt-0.5 leading-relaxed">{rec.rationale}</p>
-                        </div>
-                        <div>
-                          <p className="font-semibold text-emerald-800">Cross-Dept Utilization Gain</p>
-                          <p className="text-slate-600 mt-0.5 leading-relaxed">{rec.crossDeptBenefit}</p>
-                        </div>
-                      </div>
+                        {isExpanded && (
+                          <div className="p-3 bg-slate-50 border border-slate-200 rounded-lg space-y-1.5 text-xs text-slate-700">
+                            <p>
+                              <strong className="text-emerald-800">Campus Impact:</strong>{' '}
+                              {rec.crossDeptBenefit}
+                            </p>
+                            <p>
+                              <strong className="text-slate-900">Trade-off:</strong> {rec.tradeOff}
+                            </p>
+                          </div>
+                        )}
 
-                      <div className="flex flex-wrap items-center justify-between gap-3 pt-3 border-t border-slate-100">
-                        <div className="text-xs text-slate-600 flex items-center gap-2">
-                          {rec.autoApproveEligible ? (
-                            <span className="inline-flex items-center gap-1 text-emerald-700 font-medium">
-                              <CheckCircle2 className="w-3.5 h-3.5" aria-hidden="true" />
-                              Instant Cross-Dept Clearance
+                        <div className="flex flex-wrap items-center justify-between gap-3 pt-2 border-t border-slate-100">
+                          <div className="flex items-center gap-3 text-xs">
+                            {rec.autoApproveEligible ? (
+                              <span className="inline-flex items-center gap-1 text-emerald-700 font-medium">
+                                <CheckCircle2 className="w-3.5 h-3.5" aria-hidden="true" />
+                                Instant Approval
+                              </span>
+                            ) : (
+                              <span className="text-slate-600">Faculty Review</span>
+                            )}
+
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setExpandedRecId((prev) =>
+                                  prev === rec.candidateId ? null : rec.candidateId
+                                )
+                              }
+                              aria-expanded={isExpanded}
+                              className="inline-flex items-center gap-0.5 font-medium text-slate-600 hover:text-slate-900 cursor-pointer"
+                            >
+                              <span>{isExpanded ? 'Less' : 'Why this slot?'}</span>
+                              {isExpanded ? (
+                                <ChevronUp className="w-3.5 h-3.5" aria-hidden="true" />
+                              ) : (
+                                <ChevronDown className="w-3.5 h-3.5" aria-hidden="true" />
+                              )}
+                            </button>
+                          </div>
+
+                          <button
+                            type="button"
+                            disabled={reservingId === rec.candidateId}
+                            onClick={() => void handleReserveRecommendation(rec)}
+                            className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-semibold text-white bg-blue-700 hover:bg-blue-800 disabled:opacity-60 rounded-lg cursor-pointer whitespace-nowrap shrink-0"
+                          >
+                            <span>
+                              {reservingId === rec.candidateId ? 'Booking…' : 'Book This Slot'}
                             </span>
-                          ) : (
-                            <span>Requires Faculty Approval</span>
-                          )}
-                          <span aria-hidden="true">·</span>
-                          <span>Note: {rec.tradeOff}</span>
+                            <ArrowRight className="w-3.5 h-3.5" aria-hidden="true" />
+                          </button>
                         </div>
-
-                        <button
-                          type="button"
-                          disabled={reservingId === rec.candidateId}
-                          onClick={() => void handleReserveRecommendation(rec)}
-                          className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-semibold text-white bg-blue-700 hover:bg-blue-800 disabled:opacity-60 rounded-lg cursor-pointer whitespace-nowrap shrink-0"
-                        >
-                          <span>
-                            {reservingId === rec.candidateId
-                              ? 'Reserving…'
-                              : 'Reserve Recommended Slot'}
-                          </span>
-                          <ArrowRight className="w-3.5 h-3.5" aria-hidden="true" />
-                        </button>
-                      </div>
-                    </article>
-                  ))}
+                      </article>
+                    );
+                  })}
                 </div>
               )}
             </div>
@@ -641,11 +657,10 @@ export function SmartAllocatorView({
             <div className="bg-white border border-slate-200 rounded-xl p-8 text-center space-y-3">
               <Sparkles className="w-8 h-8 text-blue-700 mx-auto" aria-hidden="true" />
               <h2 className="text-base font-semibold text-slate-900">
-                Ready to Resolve Campus Scheduling Conflicts
+                Pick a Scenario or Submit Constraints
               </h2>
               <p className="text-sm text-slate-600 max-w-md mx-auto">
-                Click a scenario preset above or submit your project constraints on the left to let
-                Gemini 4 Hydrogen rank feasible cross-departmental hybrid lab bays.
+                Tap a preset above or run your own search on the left to find open cross-departmental bays.
               </p>
             </div>
           )}
