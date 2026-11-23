@@ -1,0 +1,6 @@
+{
+  "name": "LabLink",
+  "description": "GenAI-powered cross-departmental campus laboratory resource-sharing platform for hybrid equipment discovery, intelligent slot allocation, and project-based faculty approvals.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
